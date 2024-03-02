@@ -1,0 +1,124 @@
+import cv2
+import numpy as np
+import csv
+
+# Load YOLOv3 and its weights
+net = cv2.dnn.readNet(r'C:\Users\dell\Desktop\vehicle_detect\yolov3.weights', r'C:\Users\dell\Desktop\vehicle_detect\yolov3.cfg')
+layer_names = net.getLayerNames()
+output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
+
+# Define the region of interest (ROI)
+roi_x, roi_y, roi_w, roi_h = 10, 10, 500, 500
+
+# Map class IDs to vehicle types
+vehicle_types = {
+    2: "Car",
+    3: "Rickshaw",
+    4: "Truck",
+    # Add more mappings as needed based on your YOLO model classes
+}
+
+# Function to detect vehicles in a frame
+def detect_vehicles(frame):
+    height, width, channels = frame.shape
+    blob = cv2.dnn.blobFromImage(frame, 0.00392, (608, 608), (0, 0, 0), True, crop=False)
+    net.setInput(blob)
+    outs = net.forward(output_layers)
+
+    class_ids = []
+    confidences = []
+    boxes = []
+
+    for out in outs:
+        for detection in out:
+            scores = detection[5:]
+            class_id = np.argmax(scores)
+            confidence = scores[class_id]
+            if confidence > 0.5 and class_id in vehicle_types:  # Check if class_id is in the mapping
+                center_x, center_y, w, h = (detection[0:4] * np.array([width, height, width, height])).astype('int')
+                x, y = int(center_x - w / 2), int(center_y - h / 2)
+                boxes.append([x, y, w, h])
+                confidences.append(float(confidence))
+                class_ids.append(class_id)
+
+    return boxes, confidences, class_ids
+
+# Function to count vehicles in a video clip
+def count_vehicles(video_path):
+    cap = cv2.VideoCapture(video_path)
+
+    inflow_count = 0
+    outflow_count = 0
+    vehicle_count = {}  # Dictionary to store the count of each vehicle type
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        boxes, confidences, class_ids = detect_vehicles(frame)
+
+        # Implement logic to determine if the detected vehicles are entering or leaving
+        for i in range(len(boxes)):
+            x, y, w, h = boxes[i]
+
+            # Check if the vehicle is within the defined ROI
+            if roi_x < x + w // 2 < roi_x + roi_w and roi_y < y + h // 2 < roi_y + roi_h:
+                # Use the x-coordinate of the vehicle to determine direction
+                if x + w // 2 < roi_x + roi_w // 2:
+                    # Vehicle is entering
+                    inflow_count += 1
+                else:
+                    # Vehicle is leaving
+                    outflow_count += 1
+                 
+                # Update the count of the vehicle type
+                vehicle_type = vehicle_types[class_ids[i]]
+                vehicle_count[vehicle_type] = vehicle_count.get(vehicle_type, 0) + 1
+
+            label = f"{vehicle_types[class_ids[i]]} {i + 1}"
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
+            
+
+        # Display the result on the frame
+        cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (0, 0, 500), 2)
+        cv2.imshow("Vehicle Detection", frame)
+        
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+    total_vehicle_count = inflow_count + outflow_count
+    density_threshold_low = 10
+    density_threshold_mid = 20
+
+    if total_vehicle_count < density_threshold_low:
+        print("Vehicle Density: Low")
+    elif density_threshold_low <= total_vehicle_count < density_threshold_mid:
+        print("Vehicle Density: Moderate")
+    else:
+        print("Vehicle Density: High")
+
+    efficiency = ((inflow_count - outflow_count) / inflow_count) * 100
+    print(f"Inflow Count: {inflow_count}")
+    print(f"Outflow Count: {outflow_count}")
+    print(f"Total Vehicle Count: {total_vehicle_count}")
+    print(f"Efficiency: {efficiency}%")
+
+    # Print the count of each vehicle type
+    for vehicle_type, count in vehicle_count.items():
+        print(f"{vehicle_type} Count: {count}")
+
+# Example usage
+video_entrance_path = r'C:\Users\dell\Desktop\vehicle_detect\inflow.mp4'
+video_exit_path = r'C:\Users\dell\Desktop\vehicle_detect\outflow.mp4'
+
+count_vehicles(video_entrance_path)
+count_vehicles(video_exit_path)
+print("Meow")
